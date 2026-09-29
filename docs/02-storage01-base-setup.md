@@ -10,7 +10,7 @@
 
 | 항목 | 설정 |
 |---|---|
-| VMware VM 이름 | `POC-storage01` |
+| VMware VM 이름 | `storage01` |
 | OS | Rocky Linux 9.8 |
 | 설치 유형 | Minimal Install |
 | CPU | 2 vCPU |
