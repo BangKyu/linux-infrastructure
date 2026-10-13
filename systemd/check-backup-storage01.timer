@@ -1,0 +1,10 @@
+[Unit]
+Description=Check storage01 backup health daily
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=check-backup-storage01.service
+
+[Install]
+WantedBy=timers.target

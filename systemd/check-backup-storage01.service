@@ -1,0 +1,7 @@
+[Unit]
+Description=Check storage01 backup health
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/check-backup-storage01.sh
