@@ -143,8 +143,10 @@ VMware Workstation의 Rocky Linux 9.8 가상머신 3대에 웹 서버, 공유 �
 ```text
 linux-infrastructure/
 ├── README.md
-├── docs/                 # 01~19번 실습 기록
+├── docs/                 # 01~19번 실습 및 요약 문서
 ├── images/               # 웹 서비스 화면 증거
+├── scripts/              # 백업 상태 점검 스크립트
+├── systemd/              # 백업 상태 점검 서비스와 타이머
 ├── .gitattributes
 └── .gitignore
 ```
