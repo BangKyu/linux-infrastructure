@@ -4,6 +4,16 @@ Rocky Linux 가상머신 3대를 이용해 웹 서비스, 공유 스토리지, �
 
 단일 서버에서 명령어만 실행하는 실습이 아니라, **스토리지에 저장된 파일이 NFS를 거쳐 웹 서비스로 제공되고, 백업 서버의 이전 시점 파일을 다시 복원하는 전체 흐름**을 확인하는 것을 목표로 하였습니다.
 
+## 한눈에 보기
+
+VMware Workstation의 Rocky Linux 9.8 가상머신 3대에 웹 서버, 공유 스토리지, 백업 서버를 수동으로 구축한 개인 인프라 PoC입니다.
+
+- **구축:** Apache 웹 서비스, RAID 6·Hot Spare·LVM·XFS 스토리지, NFS 공유, rsync 백업 및 systemd 타이머
+- **운영 검증:** RAID 멤버 장애를 `mdadm --fail`로 모의해 Hot Spare 투입과 rebuild를 확인하고, 재부팅 후 RAID 자동 조립과 서비스 상태를 점검
+- **복원 검증:** 이전 시점 백업 파일을 복원해 NFS·HTTP 경로에서 접근하고 SHA-256 값이 일치함을 확인
+- **실습 범위:** 가상머신을 이용한 수동 구축·장애 대응 실습으로, 물리 서버·스토리지 장비 교체는 수행하지 않음
+
+**대표 기록:** [RAID 장애 복구](docs/09-storage01-raid-failure-recovery.md) · [백업 상태 점검](docs/18-backup01-health-check.md) · [통합 복원](docs/19-integrated-restore.md)
 
 ## 1. 프로젝트 구성
 
