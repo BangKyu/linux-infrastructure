@@ -720,9 +720,11 @@ systemd 실패 서비스             없음
 
 ## 22. 작업 결과
 
-이번 실습에서는 RAID 6의 Active Disk 한 개를 Faulty 상태로 변경하여 실제 디스크 장애 상황을 발생시켰다.
+이번 실습에서는 mdadm --fail 명령으로 RAID 6의 Active 멤버 한 개를 Faulty 상태로 변경해, RAID 멤버 장애를 모의했다.
 
-Hot Spare가 자동으로 장애 디스크의 RAID 슬롯에 투입되고 온라인 rebuild가 수행되는 과정을 확인하였다. rebuild 완료 후에도 테스트 파일의 SHA-256 체크섬이 장애 전과 동일했으며 NFS와 Apache를 통해 파일에 정상적으로 접근할 수 있었다.
+Hot Spare가 자동으로 장애 디스크의 RAID 슬롯에 투입되고 온라인 rebuild가 수행되는 과정을 확인하였다.
+
+rebuild 완료 후에도 테스트 파일의 SHA-256 체크섬이 장애 전과 동일했으며 NFS와 Apache를 통해 파일에 정상적으로 접근할 수 있었다.
 
 Faulty Disk를 배열에서 제거하고 이전 RAID 메타데이터를 초기화한 후 새로운 Hot Spare로 등록하여 `Active 4개 + Spare 1개` 구성을 다시 구성하였다.
 

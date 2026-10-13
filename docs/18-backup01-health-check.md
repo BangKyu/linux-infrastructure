@@ -156,7 +156,7 @@ printf '최신 백업본: %s\n' "$latest_name"
 ```bash
 latest_time="${latest_name:0:4}-${latest_name:4:2}-${latest_name:6:2} ${latest_name:9:2}:${latest_name:11:2}:${latest_name:13:2}"
 
-[Oprintf '읽어낸 시각: %s\n' "$latest_time"
+printf '읽어낸 시각: %s\n' "$latest_time"
 date -d "$latest_time" '+변환된 시각: %F %T %Z'
 ```
 
