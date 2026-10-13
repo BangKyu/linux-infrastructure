@@ -1,224 +1,155 @@
-# Rocky Linux Infrastructure
+# Rocky Linux Infrastructure PoC
 
-Rocky Linux 기반으로 사내 웹 서비스 환경을 직접 구축하고, 스토리지·백업·보안·장애 복구 과정을 검증하는 개인 인프라 프로젝트입니다.
+Rocky Linux 가상머신 3대를 이용해 웹 서비스, 공유 스토리지, 백업 서버를 수동으로 구축하고 장애 대응과 데이터 복원을 검증한 개인 인프라 프로젝트입니다.
 
-개별 명령어 실습이 아닌 여러 서버가 연결된 환경을 직접 설계하고 구축하는 것을 목표로 합니다. 모든 서버는 VMware Workstation에서 생성하며, 초기 구축은 자동화 도구 없이 수동으로 진행합니다.
+단일 서버에서 명령어만 실행하는 실습이 아니라, **스토리지에 저장된 파일이 NFS를 거쳐 웹 서비스로 제공되고, 백업 서버의 이전 시점 파일을 다시 복원하는 전체 흐름**을 확인하는 것을 목표로 하였습니다.
 
-## 1. 프로젝트 목표
 
-- Rocky Linux 설치 및 기본 운영 환경 구성
-- 서버 역할에 따른 시스템 분리
-- Apache, PHP-FPM, MariaDB 기반 웹 서비스 구축
-- RAID 6, LVM, XFS 기반 스토리지 구성
-- NFS를 이용한 웹 서버와 스토리지 서버 연동
-- rsync 및 DB dump 기반 백업 환경 구성
-- SELinux와 firewalld를 이용한 접근 제어
-- 서비스 상태 및 시스템 자원 점검
-- 주요 장애 발생 및 원인 분석
-- 백업 데이터 복원 및 장애 복구 검증
-- 구축·운영·장애 처리 과정을 GitHub 문서로 기록
-
-## 2. 전체 구성도
+## 1. 프로젝트 구성
 
 ```text
-                       HTTP/HTTPS
-                ┌─────────────────────┐
-                │                     ▼
-          ┌──────────┐          ┌──────────┐
-          │ client01 │          │  web01   │
-          │ .104     │          │ .101     │
-          └──────────┘          └────┬─────┘
-             접속 및 테스트       Apache/PHP
-                                  MariaDB
-                                       │
-                                       │ NFS
-                                       ▼
-                                ┌─────────────┐
-                                │  storage01  │
-                                │    .102     │
-                                └──────┬──────┘
-                                 RAID 6/LVM/XFS
-                                       │
-                                       │ SSH/rsync
-                                       ▼
-                                 ┌──────────┐
-                                 │ backup01 │
-                                 │   .103   │
-                                 └──────────┘
-                                  백업 및 복원
+                         HTTP (TCP 80)
+                    ┌───────────────────┐
+                    │       사용자       │
+                    └─────────┬─────────┘
+                              │
+                              ▼
+                    ┌───────────────────┐
+                    │ web01             │
+                    │ 10.10.10.101      │
+                    │ Apache HTTP Server│
+                    │ NFS 클라이언트     │
+                    └─────────┬─────────┘
+                              │ NFS
+                              ▼
+                    ┌───────────────────┐
+                    │ storage01         │
+                    │ 10.10.10.102      │
+                    │ RAID 6 + Hot Spare│
+                    │ LVM → XFS → NFS   │
+                    └─────────▲─────────┘
+                              │ SSH/rsync로 데이터 읽기
+                              │
+                    ┌─────────┴─────────┐
+                    │ backup01          │
+                    │ 10.10.10.103      │
+                    │ 날짜별 파일 백업   │
+                    │ systemd 타이머    │
+                    └───────────────────┘
 ```
 
-## 3. 서버 구성
+`backup01`은 SSH를 이용해 `storage01`의 NFS 데이터 원본을 읽고, 백업 데이터를 자신의 로컬 디스크에 저장합니다. `web01`은 `storage01`의 NFS 공유를 마운트하여 Apache로 파일을 제공합니다.
 
-| 서버 | IP | 역할 | 진행 상태 |
-|---|---|---|---|
-| `web01` | `10.10.10.101` | Apache, PHP-FPM, MariaDB | 기본 환경 구성 완료 |
-| `storage01` | `10.10.10.102` | RAID 6, LVM, XFS, NFS | RAID·LVM·XFS 완료 |
-| `backup01` | `10.10.10.103` | 웹·DB·파일 백업 | 설치 예정 |
-| `client01` | `10.10.10.104` | 서비스 접속 및 장애 테스트 | 설치 예정 |
+## 2. 서버별 역할
 
-## 4. 네트워크 구성
+| 서버 | IP 주소 | 주요 역할 |
+|---|---|---|
+| `web01` | `10.10.10.101` | Apache 웹 서비스, NFS 클라이언트, 웹 보안 설정 |
+| `storage01` | `10.10.10.102` | RAID 6, Hot Spare, LVM, XFS, NFS 서버 |
+| `backup01` | `10.10.10.103` | 파일 백업 저장소, rsync 날짜별 백업, systemd 예약 실행 및 상태 점검 |
 
-```text
-Network  : 10.10.10.0/24
-Gateway  : 10.10.10.2
-DNS      : 8.8.8.8, 1.1.1.1
-VMware   : NAT Network
-```
+모든 서버는 VMware Workstation의 NAT 네트워크에서 Rocky Linux 9.8을 사용합니다. 서버의 기본 운영 환경은 NetworkManager, chronyd, sshd, firewalld 및 SELinux 상태를 확인하며 구성하였습니다.
 
-서버는 고정 IPv4 주소를 사용합니다. 서비스 구축 후에는 firewalld에서 서버 역할에 필요한 포트만 허용할 예정입니다.
+## 3. 주요 구축 내용
 
-## 5. 구축 환경
+### 스토리지와 NFS
 
-- VMware Workstation
-- Rocky Linux 9.8
-- systemd
-- NetworkManager
-- SELinux Enforcing
-- firewalld
-- Git 및 GitHub
+- `storage01`에 10GiB 데이터 디스크 4개로 RAID 6을 구성하고, 디스크 1개를 Hot Spare로 추가
+- RAID 장치 `/dev/md0` 위에 `vg_storage/lv_webdata` LVM과 XFS 파일시스템 구성
+- `/srv/nfs/webdata`를 영구 마운트하고 NFS로 제공
+- `web01`에서 NFS 공유를 `/var/www/intranet/shared`에 마운트
+- `lv_webdata`와 XFS를 서비스 중 12GiB에서 16GiB로 확장
 
-## 6. 프로젝트 진행 상태
+### 웹 서비스와 보안
 
-### 1단계: web01 기본 환경 구성
+- `web01`에 Apache HTTP Server 구성
+- NFS 공유 파일을 `/shared/` HTTP 경로로 제공
+- SELinux를 Enforcing으로 유지하고 Apache의 NFS 접근 설정 적용
+- firewalld를 통해 필요한 접근만 허용
+- Apache 상세 버전 정보 노출 제한, TRACE 메서드 차단, 디렉터리 목록 차단 및 기본 보안 응답 헤더 적용
 
-- [x] VMware 가상머신 생성
-- [x] Rocky Linux 9.8 Minimal 설치
-- [x] 일반 관리자 계정 생성
-- [x] hostname을 `web01`로 설정
-- [x] 고정 IP `10.10.10.101/24` 설정
-- [x] Gateway 및 DNS 설정
-- [x] 시간대를 `Asia/Seoul`로 설정
-- [x] Chrony 시간 동기화 확인
-- [x] SSH 원격 접속 확인
-- [x] SELinux Enforcing 확인
-- [x] firewalld 실행 확인
-- [x] 실패한 systemd 서비스 점검
-- [x] NetworkManager 부팅 장애 분석 및 해결
+### 백업과 복원
 
-### 2단계: storage01 구축
+- `backup01`에 별도 30GiB XFS 백업 파일시스템 구성
+- 읽기 전용 `backupreader` 계정과 ACL을 이용해 백업 원본 접근 범위 제한
+- SSH와 rsync를 이용해 `storage01`의 파일을 `backup01`로 가져오기
+- 날짜별 백업본과 `--link-dest` 하드 링크 재사용 검증
+- 백업 스크립트를 systemd 서비스와 매일 03:00 타이머에 연결
+- 매일 04:00 실행하도록 백업 상태 점검 타이머 구성
+- 이전 시점 백업본의 파일을 별도 이름으로 복원하고 NFS·Apache 경로까지 검증
 
-- [x] Rocky Linux 설치 및 기본 환경 구성
-- [x] 데이터용 가상 디스크 4개 추가
-- [x] RAID 6 구성
-- [x] RAID 장애 허용 범위 확인
-- [x] LVM 구성
-- [x] XFS 파일시스템 생성
-- [x] UUID 기반 영구 마운트
-- [ ] NFS 서버 구성
+## 4. 장애 및 운영 검증
 
-### 3단계: 웹 서비스 구축
-
-- [ ] Apache 설치 및 VirtualHost 구성
-- [ ] PHP-FPM 연동
-- [ ] MariaDB 설치
-- [ ] 애플리케이션 전용 DB 계정 구성
-- [ ] MariaDB 외부 접근 제한
-- [ ] NFS 공유 디렉터리 연결
-- [ ] SELinux 및 firewalld 정책 적용
-- [ ] Client에서 전체 서비스 확인
-
-### 4단계: 백업 및 복원
-
-- [ ] backup01 설치
-- [ ] 웹 설정 및 콘텐츠 백업
-- [ ] MariaDB dump 생성
-- [ ] NFS 데이터 백업
-- [ ] rsync 기반 백업 구성
-- [ ] 예약 백업 구성
-- [ ] 파일 복원 테스트
-- [ ] DB 복원 테스트
-
-### 5단계: 장애 테스트
-
-- [ ] RAID 디스크 장애 및 rebuild
-- [ ] NFS 서비스 장애
-- [ ] Apache 설정 오류
-- [ ] Linux 파일 권한 오류
-- [ ] SELinux 접근 차단
-- [ ] 파일 삭제 및 복원
-- [ ] DB 데이터 삭제 및 복원
-- [ ] 디스크 사용량 증가 장애
-- [ ] 장애별 원인 분석 및 복구 보고서 작성
-
-## 7. web01 기본 사양
-
-| 항목 | 설정 |
+| 실습 | 확인한 내용 |
 |---|---|
-| OS | Rocky Linux 9.8 |
-| 설치 유형 | Minimal Install |
-| CPU | 2 vCPU |
-| Memory | 2GB |
-| OS Disk | 30GB |
-| Hostname | `web01` |
-| IP | `10.10.10.101/24` |
-| Gateway | `10.10.10.2` |
-| SELinux | Enforcing |
-| Firewall | firewalld |
-| 관리 계정 | `sysadmin` |
+| Apache 설정 오류 | 잘못된 설정으로 `reload`가 실패해도 기존 서비스가 유지되는지 확인하고 설정 복구 |
+| RAID 디스크 장애 | Active Disk 장애 시 Hot Spare 투입과 rebuild 확인 |
+| LVM·XFS 온라인 확장 | 파일시스템을 마운트한 상태에서 용량 확장 및 웹 서비스 접근 확인 |
+| 백업 스크립트 실패 처리 | 백업 저장소 경로와 원격 원본 경로 오류를 모의해 실패한 작업이 완성 백업본으로 표시되지 않는지 확인 |
+| 백업 타이머 | 시험용 예약 시각에 백업 서비스가 실제 실행되는지 확인 |
+| 백업 상태 점검 | 최신 백업본의 경과 시간 검사 및 시험용 타이머 자동 실행 확인 |
+| 이전 버전 복원 | `version 1`을 별도 파일로 복원하고 기존 `version 2`가 유지되는지 확인 |
 
-## 8. 트러블슈팅 기록
+매일 **03:00 백업**과 **04:00 상태 점검**은 해당 시각으로 설정하고 시험용 예약 시각의 자동 실행을 검증했습니다. 정규 03:00·04:00 실행 기록과 VM이 꺼져 있던 동안 놓친 작업의 보충 실행은 별도로 확인해야 합니다.
 
-### NetworkManager-wait-online 부팅 실패
+백업 보존 실습에서는 정리 후보와 저장소 사용량을 **조회만** 했습니다. 백업본 자동 삭제 정책은 구현하지 않았습니다.
 
-최초 부팅 후 다음 서비스가 실패 상태로 확인되었습니다.
+## 5. 최종 통합 복원 결과
 
-```text
-NetworkManager-wait-online.service
-Result: exit-code
-```
+`backup01`의 이전 시점 백업본에 있던 `version 1` 파일을 `storage01`의 `/srv/nfs/webdata/version-restored-v1.txt`로 복원했습니다. 기존 `version-test.txt`는 `version 2 - changed`로 유지했습니다.
 
-원인 분석 결과, 최초 부팅 당시 IPv4 네트워크 설정이 완료되지 않아 서비스가 네트워크 연결을 기다리다가 제한 시간 초과로 실패한 상태였습니다.
+`web01`에서는 NFS를 통해 복원 파일을 읽었고, Apache의 `/shared/version-restored-v1.txt` 경로에서 `HTTP/1.1 200 OK`와 `version 1`을 확인했습니다. 백업본과 복원 파일의 SHA-256 값도 일치했습니다.
 
-고정 IP와 자동 연결 설정을 완료하고 시스템을 재부팅한 후 다음과 같이 정상화되었습니다.
+자세한 절차와 출력은 [이전 시점 백업본 통합 복원 검증](docs/19-integrated-restore.md)에 기록했습니다.
 
-```text
-Active: active (exited)
-status=0/SUCCESS
-```
+## 6. 실습 문서
 
-최종적으로 실패한 systemd 서비스가 없음을 확인했습니다.
+### 기본 환경 및 스토리지
 
-```text
-0 loaded units listed.
-```
+1. [web01 기본 운영 환경 구성](docs/01-web01-base-setup.md)
+2. [storage01 기본 운영 환경 구성](docs/02-storage01-base-setup.md)
+3. [storage01 RAID 6, LVM 및 XFS 구성](docs/03-storage01-raid-lvm.md)
+4. [storage01 NFS 서버 구성](docs/04-storage01-nfs-server.md)
+5. [web01 NFS 클라이언트 구성](docs/05-web01-nfs-client.md)
 
-세부 과정은 [web01 기본 운영 환경 구성](docs/01-web01-base-setup.md) 문서에 기록합니다.
+### 웹 서비스 및 장애 대응
 
-## 9. 저장소 구조
+6. [web01 Apache 및 NFS 연동 구성](docs/06-web01-apache-nfs.md)
+7. [web01 Apache 보안 강화](docs/07-web01-apache-security-hardening.md)
+8. [web01 Apache 설정 장애 분석 및 복구](docs/08-web01-apache-config-incident-recovery.md)
+9. [storage01 RAID 6 디스크 장애 및 Hot Spare 복구](docs/09-storage01-raid-failure-recovery.md)
+10. [storage01 LVM 및 XFS 온라인 확장](docs/10-storage01-lvm-xfs-extension.md)
+
+### 백업 서버 및 복원
+
+11. [backup01 기본 운영 환경 구성](docs/11-backup01-base-setup.md)
+12. [backup01 LVM 및 XFS 백업 저장소 구성](docs/12-backup01-lvm-xfs-storage.md)
+13. [storage01 데이터 백업 및 복원 검증](docs/13-storage01-backup-restore.md)
+14. [backup01 rsync 기반 버전별 파일 백업](docs/14-backup01-versioned-backup.md)
+15. [backup01 백업 스크립트 정상 동작 및 실패 처리 검증](docs/15-backup01-script-failure-test.md)
+16. [backup01 systemd 서비스 및 백업 타이머 구성](docs/16-backup01-systemd-timer.md)
+17. [backup01 백업 보존 대상 및 저장소 용량 점검](docs/17-backup01-retention-capacity.md)
+18. [backup01 백업 상태 점검 및 자동 실행](docs/18-backup01-health-check.md)
+19. [이전 시점 백업본 통합 복원 검증](docs/19-integrated-restore.md)
+
+## 7. 저장소 구조
 
 ```text
 linux-infrastructure/
 ├── README.md
-├── docs/
-│   └── 01-web01-base-setup.md
-├── configs/
-├── scripts/
-├── evidence/
+├── docs/                 # 01~19번 실습 기록
+├── images/               # 웹 서비스 화면 증거
 ├── .gitattributes
 └── .gitignore
 ```
 
-- `docs`: 구축 과정, 점검 결과 및 장애 보고서
-- `configs`: 서비스별 설정 파일 예시
-- `scripts`: 백업 및 점검 스크립트
-- `evidence`: 주요 구축 및 장애 복구 증거
-- `.gitignore`: 인증정보, VM 파일 및 임시 파일 제외
-- `.gitattributes`: 문서와 스크립트의 줄바꿈 형식 관리
+현재 `configs/`, `scripts/`, `evidence/`에는 자리 표시자 파일만 있습니다. 서버에서 사용한 실제 설정과 스크립트는 각 실습 문서에 기록되어 있으며, 해당 디렉터리에 별도 파일로 게시한 것은 아닙니다.
 
-## 10. 보안 원칙
+## 8. 프로젝트 범위와 한계
 
-- 실제 비밀번호와 인증정보를 GitHub에 저장하지 않습니다.
-- SSH 개인키를 저장소에 포함하지 않습니다.
-- DB 비밀번호가 필요한 파일은 예제 파일로만 제공합니다.
-- MariaDB는 웹 서버 외부에서 직접 접근할 수 없도록 구성합니다.
-- SELinux를 비활성화하지 않고 필요한 정책을 적용합니다.
-- firewalld에는 서비스 운영에 필요한 포트만 허용합니다.
-- 장애 해결을 위해 무조건 `chmod 777`을 사용하지 않습니다.
-- VMware 가상 디스크와 운영체제 ISO는 저장소에 포함하지 않습니다.
-
-## 11. 문서
-
-- [web01 기본 운영 환경 구성](docs/01-web01-base-setup.md)
-
-프로젝트가 진행될 때마다 서버 구축 문서, 설정 파일, 점검 결과 및 장애 복구 보고서를 추가할 예정입니다.
+- 이 프로젝트는 **수동 구축 중심의 학습용 PoC**입니다. Ansible 등의 구성 자동화는 포함하지 않았습니다.
+- RAID 6은 디스크 장애 대응 수단이며 백업을 대체하지 않습니다.
+- 백업 데이터는 별도 VM에 저장하지만 동일한 실습 환경에 있으므로 원격지·오프사이트 백업을 검증한 것은 아닙니다.
+- Apache는 HTTP로 제공하며 HTTPS 암호화는 구성하지 않았습니다.
+- PHP-FPM, MariaDB, DB dump 및 애플리케이션 데이터베이스 복원은 현재 실습 범위에 포함되지 않습니다.
+- 비밀번호와 SSH 개인키는 저장소에 게시하지 않습니다.
