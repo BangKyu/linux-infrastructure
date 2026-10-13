@@ -738,7 +738,7 @@ Faulty Disk를 배열에서 제거하고 이전 RAID 메타데이터를 초기�
 → Hot Spare 자동 투입 및 rebuild 관찰
 → 데이터와 서비스 상태 확인
 → Faulty Disk 제거
-→ 교체 디스크 RAID 메타데이터 초기화
+→ 배열에서 제거한 실습용 디스크의 RAID 메타데이터 초기화
 → 새로운 Hot Spare 등록
 → RAID 상태 및 데이터 무결성 검증
 → 재부팅 후 자동 복구 확인
